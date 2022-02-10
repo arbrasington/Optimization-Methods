@@ -132,10 +132,7 @@ class GeneticAlgorithm:
         self.population = [Chromosome('random', self.dims) for _ in range(self.pop_size)]
         
         self.gen = 1
-        self.decode(self.population[0].genes)
-        
-        alpha = self.alpha_function()
-        self.population[0].mate(self.population[1], alpha, beta)
+
     
     def run(self):
         """
@@ -147,6 +144,7 @@ class GeneticAlgorithm:
         """
         self.evaluate_pop(self.population)
         fitness = np.asarray([c.fitness for c in self.population])
+        best_vals = []
 
         while self.gen <= self.generations:
             print(f'Generation {self.gen} of {self.generations}')
@@ -168,9 +166,11 @@ class GeneticAlgorithm:
                                                     fitness,
                                                     child_pop,
                                                     child_fitness)
-            
+            best_vals.append(best.fitness)
             print(f'Best: {self.decode(best.genes)} -> {best.fitness}\n')
             self.gen += 1
+            
+        return best_vals
             
     def tournament_selection(self, fitness):
         """
@@ -198,7 +198,7 @@ class GeneticAlgorithm:
                 if self.opt_type == 'max':
                     winner = np.argmax(fitness[players])  # pick player with maximum score
                 else:
-                    winner = np.argmax(fitness[players]) # pick player with minimum score
+                    winner = np.argmin(fitness[players]) # pick player with minimum score
                     
                 parents[i, j] = players[winner] # add winning chromosome to parents
                 
@@ -301,7 +301,7 @@ class GeneticAlgorithm:
 
 
 
-inputs = {i: [int, [0, 20]] for i in range(10)}
+inputs = {i: [int, [0, 10]] for i in range(10)}
 
 def f(x):
     return np.sum(x)
@@ -311,9 +311,12 @@ GA = GeneticAlgorithm(input_dict=inputs,
                       pop_size=50,
                       fitness=f,
                       beta=0.25,
-                      opt_type='max')
-GA.run()
+                      opt_type='min')
+vals = GA.run()
 
+import matplotlib.pyplot as plt
+plt.plot(vals)
+plt.show()
 # print(Chromosome('random', 10).genes)
 # print(GA.population)
 

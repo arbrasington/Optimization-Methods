@@ -5,13 +5,13 @@ Created on Mon Jan 31 18:09:10 2022
 @author: ALEXRB
 """
 import abc
-from math import floor, ceil
 from random import random, uniform
 from copy import deepcopy
+from typing import Callable
 
-import matplotlib.pyplot as plt
 import numpy as np
-import os
+
+from transformer import transform
 
 
 class Particle:
@@ -19,27 +19,40 @@ class Particle:
     Particle class
     """
 
-    def __init__(self, bounds):
-        self.dims = len(bounds)
+    def __init__(self, dims, max_min):
+        self.dims = dims
+        self.max_min = max_min
 
-        self.position = [random() for _ in range(self.dims)]
-        self.velocity = [uniform(-1, 1) for _ in range(self.dims)]
+        self.position = np.random.rand(self.dims)
+        self.velocity = np.random.uniform(-1., 1., self.position.shape)
 
         self.best_pos = self.position.copy()
 
-        self.err = -1
-        self.best_err = -1
+        self.err = -np.inf if self.max_min == 'max' else np.inf
+        self.best_err = -np.inf if self.max_min == 'max' else np.inf
 
-    def evaluate(self, costFunc):
+    def evaluate(self, costFunc, var_types, bounds):
         """
         Evaluate current fitness with the given function
         """
-        self.err = costFunc(self.position)
-
-        # check to see if the current position is an individual best
-        if self.err > self.best_err or self.best_err == -1:
-            self.best_pos = self.position.copy()
-            self.best_err = self.err
+        self.err = costFunc(self.decode(var_types, bounds))
+        
+        if self.max_min == 'max':
+            if self.err > self.best_err:
+                self.best_pos = self.position.copy()
+                self.best_err = self.err
+        else:
+            if self.err < self.best_err:
+                self.best_pos = self.position.copy()
+                self.best_err = self.err
+    
+    def decode(self, types, bounds):
+        decoded = np.zeros(self.position.shape)
+        for i in range(decoded.shape[0]):
+            decoded[i] = transform(self.position[i],
+                                   types[i],
+                                   bounds[i])
+        return decoded
 
     def update_velocity(self, pos_best_g):
         """
@@ -55,154 +68,100 @@ class Particle:
             self.velocity[i] = w * self.velocity[i] + vel_cognitive + vel_social
 
     # update the particle position based off new velocity updates
-    def update_position(self, bounds):
+    def update_position(self):
         """
         Update the particle's position based off the velocities
         """
+        maxx = 1
+        minn = 0
+
         for i in range(self.dims):
             self.position[i] = self.position[i] + self.velocity[i]
 
             # adjust maximum position if necessary
-            if self.position[i] > bounds[i][1]:
-                self.position[i] = bounds[i][1]
+            if self.position[i] > maxx:
+                self.position[i] = maxx
 
             # adjust minimum position if necessary
-            if self.position[i] < bounds[i][0]:
-                self.position[i] = bounds[i][0]
+            if self.position[i] < minn:
+                self.position[i] = minn
 
 
-class ParticleSwarmOptimizer(abc.ABC):
+class ParticleSwarmOptimizer:
     """
     Particle swarm optimizer for maximizing an objective function
     """
     best_pos = []
     best_err = -1
 
-    def __init__(self):
-        self.pop_size = 15
-        self.generations = 10
-        self.particles = self.pop_size
-        self.max_iters = self.generations
-        self.bounds = []
-        self.particle_bounds = []
-        self.bestlist = []
+    def __init__(self, input_dict: dict,
+                 particles: int,
+                 max_itrs: int,
+                 fitness: Callable,
+                 opt_type='max'):
 
-        self.stop = False
-        self.is_running = False
+        self.var_types = np.asarray([value[0] for _, value in input_dict.items()])
+        self.bounds = np.asarray([value[1] for _, value in input_dict.items()])
 
-        self.swarm = [Particle([[0, 1]] * len(self.bounds)) for _ in range(self.particles)]  # initialize swarm
-        self.results = np.zeros((len(self.swarm) * self.max_iters, len(self.bounds) + 2))  # results container
+        self.dims = self.bounds.shape[0]
+        self.particles = particles
+        self.max_iters = max_itrs
+        self.fitness = fitness
+        self.opt_type = opt_type
+
+        self.swarm = [Particle(self.dims, self.opt_type) for _ in range(self.particles)]  # initialize swarm
 
     def run(self):
         """
         Run the optimization
         """
-        self.is_running = True
-        self.running.signal.emit()
-        self.particle_bounds = [[0, 1]] * len(self.bounds)
-        self.particles = self.pop_size
-        self.max_iters = self.generations
-        self.swarm = [Particle([[0, 1]] * len(self.bounds)) for _ in range(self.particles)]
-        self.results = np.zeros((len(self.swarm) * self.max_iters, len(self.bounds) + 2))
+        self.best_err = -np.inf if self.opt_type == 'max' else np.inf
 
+        best_list = []
         for i in range(self.max_iters):
-
-            if self.stop:
-                self.is_running = False
-                return
+            print(f'Iteration {i+1} of {self.max_iters}')
 
             # cycle through particles
             for j in range(len(self.swarm)):
-                self.swarm[j].evaluate(self.fitness)
-                self.update_results(self.swarm[j], j + self.particles * i)
+                self.swarm[j].evaluate(self.fitness, self.var_types, self.bounds)
 
                 # determine if this particle is the best
-                if self.swarm[j].err > self.best_err or self.best_err == -1:
-                    self.best_pos = self.swarm[j].position.copy()
-                    self.best_err = deepcopy(self.swarm[j].err)
-                    self.bestlist.append(self.best_err)
+                if self.opt_type == 'max':
+                    if self.swarm[j].err > self.best_err:
+                        self.best_pos = self.swarm[j].position.copy()
+                        self.best_err = deepcopy(self.swarm[j].err)
+                        self.best_part = self.swarm[j]
+                else:
+                    if self.swarm[j].err < self.best_err:
+                        self.best_pos = self.swarm[j].position.copy()
+                        self.best_err = deepcopy(self.swarm[j].err)
+                        self.best_part = self.swarm[j]
 
             # update velocities and positions
             for j in range(len(self.swarm)):
                 self.swarm[j].update_velocity(self.best_pos)
-                self.swarm[j].update_position(self.particle_bounds)
+                self.swarm[j].update_position()
+            
+            print(f'Best: {self.best_part.decode(self.var_types, self.bounds)} -> {self.best_part.err}\n')
+            best_list.append(self.best_err)
 
-            if self.convergence(i): return
-
-    def stop_run(self):
-        self.stop = True
-        while self.is_running:
-            pass
-        self.stopped.signal.emit()
-
-    def reinitialize(self):
-        """
-        Reset all variables and create a new swarm
-        """
-        self.swarm = [Particle([[0, 1]] * len(self.bounds)) for _ in range(self.particles)]  # initialize swarm
-        self.results = np.zeros((len(self.swarm) * self.max_iters, len(self.bounds) + 2))  # results container
-        self.best_err, self.best_pos = -1, []
-        self.stop = False
-        self.reset.signal.emit()
-
-    def update_results(self, particle: Particle, index):
-        """
-        Update the results array and save to file
-        """
-        itr = floor(index / self.particles) + 1
-        self.results[index] = [itr, *particle.position, particle.err]
-        self.updated.signal.emit(self.results[~np.all(self.results == 0, axis=1)])
-
-        # if self.filename is not None and isinstance(self.filename, str):
-        #     with open(self.filename, 'a') as f:
-        #         if index == 0:
-        #             f.truncate(0)  # reset the file
-        #         np.savetxt(f, [itr, *particle.position, particle.err], newline=',')
-        #         f.write("\n")
-        # f.close()
-
-    def convergence(self, iteration, value=1e-10):
-        """
-        Test for convergence based on variance of current swarm
-        """
-        data = self.results[self.results[:, 0] == iteration + 1, 1:-1]
-        return np.all(np.var(data, axis=0) <= value)
-
-    @abc.abstractmethod
-    def fitness(self, inputs):
-        pass
-
-    @staticmethod
-    def continuous_to_int(continuous, lower_bound, upper_bound):
-        """
-        Convert the continuous variable to its corresponding integer value
-        """
-        integer = floor((upper_bound - lower_bound + 1) * continuous) + lower_bound
-        if integer > upper_bound: integer = upper_bound
-        if integer < lower_bound: integer = lower_bound
-        return integer
-
-    @staticmethod
-    def continuous_to_real(continuous, lower_bound, upper_bound):
-        """
-        Convert the continuous variable to its corresponding real value
-        """
-        return (upper_bound - lower_bound) * continuous + lower_bound
+        return best_list
 
 
-class Test_PSO(ParticleSwarmOptimizer):
-    def __init__(self, bounds, particles, iterations, filename):
-        super().__init__(bounds, particles, iterations, filename)
-
-    def fitness(self, inputs):
-        return sum([i ** 2 for i in inputs])
+inputs = {i: [int, [0, 10]] for i in range(20)}
 
 
-if __name__ == '__main__':
-    bounds = [(0, 1), (0, 1), (0, 6), (8, 16)]
+def f(x):
+    return np.sum(x)
 
-    pso = Test_PSO(bounds=bounds,
-                   particles=20,
-                   iterations=10,
-                   filename='test.csv')
-    pso.run()
+
+PSO = ParticleSwarmOptimizer(input_dict=inputs,
+                            particles=50,
+                            max_itrs=50,
+                            fitness=f,
+                            opt_type='max')
+vals = PSO.run()
+
+import matplotlib.pyplot as plt
+plt.plot(vals)
+plt.show()
